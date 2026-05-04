@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.pth
+*.npy
+*.stl
+*.egg-info/
+dist/
+build/
+.env
+venv/
+generated/*.stl
+checkpoints/*.pth
+fallbacks/*.stl
+fallbacks/*.json
+.DS_Store

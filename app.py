@@ -19,7 +19,8 @@ from flask_cors import CORS
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model.vae import BoneVAE
 from model.metrics import compute_scaffold_metrics
-from geometry.mesh_export import voxel_to_stl
+from geometry.mesh_export import voxel_to_stl, apply_cylinder_mask
+from data.synthetic import generate_bone_sample
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
@@ -104,8 +105,9 @@ def generate():
 
     if model_loaded:
         try:
-            # 1. Generate voxel grid
+            # 1. Generate voxel grid and shape it
             voxel = model.generate(porosity_frac, device=device)
+            voxel = apply_cylinder_mask(voxel)
 
             # 2. Compute metrics
             metrics = compute_scaffold_metrics(voxel)
@@ -179,6 +181,7 @@ def generate_batch():
         if model_loaded:
             try:
                 voxel = model.generate(porosity_frac, device=device)
+                voxel = apply_cylinder_mask(voxel)
                 metrics = compute_scaffold_metrics(voxel)
                 voxel_to_stl(voxel, stl_path)
             except Exception as e:
@@ -225,12 +228,19 @@ def simulate():
     
     porosity_frac = porosity_pct / 100.0
 
-    if not model_loaded:
-        return jsonify({"error": "Model required for simulation"}), 503
-
     try:
         # Recreate the exact voxel grid
-        voxel = model.generate(porosity_frac, device=device)
+        if model_loaded:
+            voxel = model.generate(porosity_frac, device=device)
+        else:
+            # Fallback for hackathon: if model not loaded, generate synthetic voxel grid
+            # that looks like bone so simulation can still run
+            import numpy as np
+            np.random.seed(seed)
+            voxel = generate_bone_sample(target_porosity=porosity_frac)
+            
+        # Make it a cylinder shape
+        voxel = apply_cylinder_mask(voxel)
         
         # Run simulation
         import model.ingrowth as ingrowth

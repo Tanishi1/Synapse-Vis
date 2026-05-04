@@ -215,7 +215,7 @@
       <label>Cross-section <span id="clip-display">OFF</span></label>
       <input type="range" id="clip-slider" min="0" max="100" step="1" value="0"
         oninput="onClipChange(this.value)">
-      <div class="range-labels"><span>Full</span><span>Sliced</span></div>
+      <div class="range-labels"><span>Sliced</span><span>Full</span></div>
     </div>
     <div class="divider"></div>
     <div class="control-group">
@@ -442,7 +442,7 @@ function downloadSTL(){if(!currentJobId)return;
 // Cross-section control
 function onClipChange(val){
   const v=parseInt(val);
-  if(v===0){clipEnabled=false;clipPlane.constant=999;
+  if(v===100){clipEnabled=false;clipPlane.constant=999;
     document.getElementById('clip-display').textContent='OFF';
     matSolid.clippingPlanes=[];matWire.clippingPlanes=[];matTransparent.clippingPlanes=[];
   }else{
@@ -451,9 +451,9 @@ function onClipChange(val){
     if(currentMesh){
       const box=new THREE.Box3().setFromObject(currentMesh);
       const minY=box.min.y,maxY=box.max.y;
-      clipPlane.constant=maxY-(v/100)*(maxY-minY);
+      clipPlane.constant=minY+(v/100)*(maxY-minY);
     }
-    document.getElementById('clip-display').textContent=v+'%';
+    document.getElementById('clip-display').textContent=(100-v)+'%';
   }
 }
 

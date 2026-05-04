@@ -14,6 +14,38 @@ import numpy as np
 from skimage.measure import marching_cubes
 import trimesh
 
+def apply_cylinder_mask(voxel_grid: np.ndarray) -> np.ndarray:
+    """
+    Carve a 3D cubic voxel grid into a cylinder to mimic a real bone implant shape.
+    """
+    masked = voxel_grid.copy()
+    z, y, x = np.indices(masked.shape)
+    
+    # Center of the grid
+    cz, cy, cx = [s / 2.0 for s in masked.shape]
+    
+    # Calculate distance from the center along the X-Z plane (making Y the height of the cylinder)
+    # We want a cylinder standing upright, so we mask based on X and Z
+    radius = min(masked.shape[0], masked.shape[2]) / 2.0 - 2 # leave a 2-voxel margin
+    
+    distance_from_center = np.sqrt((x - cx)**2 + (z - cz)**2)
+    
+    # Set voxels outside the radius to 0 (pore/empty)
+    masked[distance_from_center > radius] = 0
+    
+    # Also add a slight chamfer/bevel at the top and bottom to make it look machined
+    bevel = 4
+    mask_bevel = distance_from_center > (radius - bevel)
+    
+    # Apply bevel to top and bottom layers
+    for i in range(bevel):
+        # Top
+        masked[i, mask_bevel[i]] = 0
+        # Bottom
+        masked[-(i+1), mask_bevel[-(i+1)]] = 0
+    
+    return masked
+
 
 def voxel_to_stl(voxel_grid: np.ndarray, filepath: str, smooth: bool = True) -> tuple:
     """

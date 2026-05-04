@@ -33,7 +33,8 @@ def simulate_ingrowth(scaffold_grid: np.ndarray, n_steps: int = 20) -> list:
           }
     """
     scaffold = scaffold_grid.astype(np.float32)
-    pore_mask = scaffold < 0.5  # True where pore space exists
+    # Only voxels that are exactly 0 are valid pores. -1 is empty air outside the implant.
+    pore_mask = scaffold == 0
 
     total_pore_voxels = np.sum(pore_mask)
     if total_pore_voxels == 0:

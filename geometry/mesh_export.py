@@ -16,8 +16,8 @@ import trimesh
 
 def apply_cylinder_mask(voxel_grid: np.ndarray) -> np.ndarray:
     """
-    Carve a 3D cubic voxel grid into an hourglass shape to mimic a real 
-    segmental femur defect implant (diaphysis shape).
+    Carve the voxel grid into a straight cylinder with solid cortical rings 
+    at the top and bottom, matching the exact biomimetic scaffold visual.
     """
     masked = voxel_grid.copy()
     z, y, x = np.indices(masked.shape)
@@ -26,37 +26,26 @@ def apply_cylinder_mask(voxel_grid: np.ndarray) -> np.ndarray:
     cz, cy, cx = [s / 2.0 for s in masked.shape]
     height = masked.shape[1]
     
-    # Calculate distance from the center along the X-Z plane
+    # Radii
+    R_outer = min(masked.shape[0], masked.shape[2]) / 2.0 - 2
+    R_inner = R_outer * 0.7  # For the hollow center of the cortical ring
+    
     distance_from_center = np.sqrt((x - cx)**2 + (z - cz)**2)
     
-    # Hourglass shape: radius varies with y
-    # Base radius at the ends
-    R_ends = min(masked.shape[0], masked.shape[2]) / 2.0 - 2
-    # Neck radius in the middle (thinner)
-    R_mid = R_ends * 0.65
+    # 1. Carve outer cylinder (everything outside R_outer is void 0)
+    masked[distance_from_center > R_outer] = 0
     
-    # Quadratic function for radius depending on y
-    # y ranges from 0 to height. Middle is at height/2.
-    # r(y) = a*(y - cy)^2 + R_mid
-    # At y = 0 or y = height, r(y) = R_ends.
-    # So a*(cy)^2 + R_mid = R_ends  =>  a = (R_ends - R_mid) / (cy**2)
-    a = (R_ends - R_mid) / (cy**2)
-    radius_at_y = a * (y - cy)**2 + R_mid
+    # 2. Add solid cortical rings at top and bottom 10%
+    ring_margin = int(height * 0.10)
+    is_top_or_bottom = (y < ring_margin) | (y >= height - ring_margin)
+    is_in_ring = (distance_from_center <= R_outer) & (distance_from_center >= R_inner)
     
-    # Set voxels outside the variable radius to 0 (pore/empty)
-    masked[distance_from_center > radius_at_y] = 0
+    # Force the ring area to be solid bone (1)
+    masked[is_top_or_bottom & is_in_ring] = 1
     
-    # Also add a slight chamfer/bevel at the top and bottom to make it look machined
-    bevel = 3
-    # Use the max radius for the bevel calculation to ensure it tapers nicely
-    mask_bevel = distance_from_center > (radius_at_y - bevel)
-    
-    # Apply bevel to top and bottom layers
-    for i in range(bevel):
-        # Top
-        masked[i, mask_bevel[i]] = 0
-        # Bottom
-        masked[-(i+1), mask_bevel[-(i+1)]] = 0
+    # Ensure the hollow center of the top/bottom rings is completely empty (0)
+    is_in_hole = distance_from_center < R_inner
+    masked[is_top_or_bottom & is_in_hole] = 0
     
     return masked
 
@@ -78,10 +67,14 @@ def voxel_to_stl(voxel_grid: np.ndarray, filepath: str, smooth: bool = True) -> 
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
+    # Convert -1 (empty air) and 0 (pore) both to 0 (void) for the mesh,
+    # leaving only 1 (solid) as 1.
+    binary_grid = (voxel_grid > 0).astype(np.float32)
+
     # Pad the volume by 1 voxel on each side with solid material.
     # This ensures Marching Cubes produces a closed mesh (no open edges)
     # which is required for valid STL files.
-    padded = np.pad(voxel_grid, pad_width=1, mode="constant", constant_values=0)
+    padded = np.pad(binary_grid, pad_width=1, mode="constant", constant_values=0)
 
     # Marching Cubes: find the isosurface at the solid/void boundary.
     # level=0.5 is the midpoint between 0 (void) and 1 (solid).

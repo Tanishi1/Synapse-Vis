@@ -191,7 +191,7 @@
       <div class="metric" id="m-porosity">
         <div class="metric-label">Porosity</div>
         <div class="metric-value">—<span class="metric-unit">%</span></div>
-        <div class="metric-ref">Target: 60–80%</div>
+        <div class="metric-ref">Target: 55–85%</div>
       </div>
       <div class="metric" id="m-diameter">
         <div class="metric-label">Pore diameter</div>
@@ -201,30 +201,22 @@
       <div class="metric" id="m-connectivity">
         <div class="metric-label">Connectivity</div>
         <div class="metric-value">—</div>
-        <div class="metric-ref">Target: &gt;0.80</div>
+        <div class="metric-ref">Target: >0.70</div>
       </div>
       <div class="metric" id="m-sav">
         <div class="metric-label">SA/V ratio</div>
         <div class="metric-value">—<span class="metric-unit">mm⁻¹</span></div>
-        <div class="metric-ref">Target: &gt;2.0</div>
+        <div class="metric-ref">Target: >1.0</div>
       </div>
     </div>
     <div id="viability-badge">Generate to check viability</div>
     <div class="divider"></div>
-    <div class="control-group">
+    <div class="control-group" style="margin-bottom:12px">
       <label>Cross-section <span id="clip-display">OFF</span></label>
       <input type="range" id="clip-slider" min="0" max="100" step="1" value="0"
         oninput="onClipChange(this.value)">
       <div class="range-labels"><span>Sliced</span><span>Full</span></div>
     </div>
-    <div class="divider"></div>
-    <div class="control-group">
-      <label>Bone Ingrowth <span id="sim-display">Step 0</span></label>
-      <input type="range" id="sim-slider" min="0" max="0" step="1" value="0"
-        oninput="onSimChange(this.value)" disabled>
-      <div class="range-labels"><span>Implant</span><span>Healed</span></div>
-    </div>
-    <button class="btn btn-secondary" id="sim-btn" onclick="runSimulation()" style="margin-bottom:12px" disabled>▶ Run Simulation</button>
     <button class="btn btn-secondary" id="dl-btn" onclick="downloadSTL()" disabled>Download STL File</button>
     <details>
       <summary>Literature evidence</summary>
@@ -409,17 +401,7 @@ async function generate(){
     if(m.biologically_viable){badge.className='viable';badge.textContent='✓ Biologically viable scaffold';}
     else{badge.className='not-viable';badge.textContent='✗ Outside target range — regenerate';}
     loadSTLFromURL(data.stl_url);document.getElementById('dl-btn').disabled=false;
-    
-    // Reset sim
-    document.getElementById('sim-slider').value=0;
-    document.getElementById('sim-slider').disabled=true;
-    document.getElementById('sim-display').textContent='Step 0';
-    const simBtn=document.getElementById('sim-btn');
-    simBtn.disabled=false;
-    simBtn.innerHTML='▶ Run Simulation';
-    simBtn.onclick=runSimulation;
-    clearInterval(simPlaybackInterval);
-    
+
   }catch(err){console.error(err);
     alert('Generation error: '+err.message+'\n\nMake sure app.py is running on port 5000.');
     document.getElementById('empty-state').style.display='flex';

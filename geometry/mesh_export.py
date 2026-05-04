@@ -16,26 +16,40 @@ import trimesh
 
 def apply_cylinder_mask(voxel_grid: np.ndarray) -> np.ndarray:
     """
-    Carve a 3D cubic voxel grid into a cylinder to mimic a real bone implant shape.
+    Carve a 3D cubic voxel grid into an hourglass shape to mimic a real 
+    segmental femur defect implant (diaphysis shape).
     """
     masked = voxel_grid.copy()
     z, y, x = np.indices(masked.shape)
     
     # Center of the grid
     cz, cy, cx = [s / 2.0 for s in masked.shape]
+    height = masked.shape[1]
     
-    # Calculate distance from the center along the X-Z plane (making Y the height of the cylinder)
-    # We want a cylinder standing upright, so we mask based on X and Z
-    radius = min(masked.shape[0], masked.shape[2]) / 2.0 - 2 # leave a 2-voxel margin
-    
+    # Calculate distance from the center along the X-Z plane
     distance_from_center = np.sqrt((x - cx)**2 + (z - cz)**2)
     
-    # Set voxels outside the radius to 0 (pore/empty)
-    masked[distance_from_center > radius] = 0
+    # Hourglass shape: radius varies with y
+    # Base radius at the ends
+    R_ends = min(masked.shape[0], masked.shape[2]) / 2.0 - 2
+    # Neck radius in the middle (thinner)
+    R_mid = R_ends * 0.65
+    
+    # Quadratic function for radius depending on y
+    # y ranges from 0 to height. Middle is at height/2.
+    # r(y) = a*(y - cy)^2 + R_mid
+    # At y = 0 or y = height, r(y) = R_ends.
+    # So a*(cy)^2 + R_mid = R_ends  =>  a = (R_ends - R_mid) / (cy**2)
+    a = (R_ends - R_mid) / (cy**2)
+    radius_at_y = a * (y - cy)**2 + R_mid
+    
+    # Set voxels outside the variable radius to 0 (pore/empty)
+    masked[distance_from_center > radius_at_y] = 0
     
     # Also add a slight chamfer/bevel at the top and bottom to make it look machined
-    bevel = 4
-    mask_bevel = distance_from_center > (radius - bevel)
+    bevel = 3
+    # Use the max radius for the bevel calculation to ensure it tapers nicely
+    mask_bevel = distance_from_center > (radius_at_y - bevel)
     
     # Apply bevel to top and bottom layers
     for i in range(bevel):

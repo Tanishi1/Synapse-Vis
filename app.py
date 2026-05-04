@@ -13,6 +13,7 @@ import sys
 import json
 import uuid
 import torch
+import numpy as np
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
@@ -235,7 +236,6 @@ def simulate():
         else:
             # Fallback for hackathon: if model not loaded, generate synthetic voxel grid
             # that looks like bone so simulation can still run
-            import numpy as np
             np.random.seed(seed)
             voxel = generate_bone_sample(target_porosity=porosity_frac)
             

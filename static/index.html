@@ -120,6 +120,15 @@
     @keyframes spin { to { transform:rotate(360deg); } }
     #loading p { font-size:13px; color:var(--text-2); }
     #timer { font-size:11px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+    /* Patient profile */
+    .patient-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .patient-field { display:flex; flex-direction:column; gap:4px; }
+    .patient-field label { font-size:10px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-3); }
+    .patient-field select, .patient-field input { background:var(--bg-input); border:1px solid var(--border);
+      color:var(--text-1); padding:7px 10px; border-radius:6px; font-size:12px; outline:none; }
+    .patient-field select:focus, .patient-field input:focus { border-color:var(--accent); }
+    .auto-badge { font-size:10px; color:var(--accent); background:var(--accent-dim);
+      padding:2px 8px; border-radius:4px; display:inline-block; margin-top:4px; }
   </style>
 </head>
 <body>
@@ -129,6 +138,45 @@
       <h1>Synapse-Vis</h1>
       <p>Generative AI for 3D bone scaffold micro-architecture design</p>
     </div>
+    <div class="divider"></div>
+
+    <!-- Patient Profile -->
+    <details>
+      <summary>Patient clinical profile</summary>
+      <div style="padding:0 14px 12px; display:flex; flex-direction:column; gap:10px;">
+        <div class="patient-grid">
+          <div class="patient-field">
+            <label>Age</label>
+            <input type="number" id="pt-age" value="55" min="18" max="95" onchange="calcAutoP()">
+          </div>
+          <div class="patient-field">
+            <label>T-Score</label>
+            <input type="number" id="pt-tscore" value="-1.5" step="0.1" min="-4" max="2" onchange="calcAutoP()">
+          </div>
+        </div>
+        <div class="patient-field">
+          <label>Defect site</label>
+          <select id="pt-site" onchange="calcAutoP()">
+            <option value="femur">Femur (load-bearing)</option>
+            <option value="tibia">Tibia</option>
+            <option value="spine">Vertebral body</option>
+            <option value="cranial">Cranial (non-load)</option>
+            <option value="maxilla">Maxillofacial</option>
+          </select>
+        </div>
+        <div class="patient-field">
+          <label>Defect size</label>
+          <select id="pt-size" onchange="calcAutoP()">
+            <option value="small">Small (&lt;2cm)</option>
+            <option value="medium" selected>Medium (2-5cm)</option>
+            <option value="large">Large (&gt;5cm)</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" onclick="applyAutoP()" style="font-size:12px;padding:8px">Apply recommended porosity</button>
+        <div id="auto-p-result"></div>
+      </div>
+    </details>
+
     <div class="divider"></div>
     <div class="control-group">
       <label>Target porosity <span id="porosity-display">70%</span></label>
@@ -440,6 +488,38 @@ function selectBatch(jobId,stlUrl,m){
 }
 
 function closeBatch(){document.getElementById('batch-panel').classList.remove('active');}
+
+// Patient profile auto-porosity
+function calcAutoP(){
+  const age=parseInt(document.getElementById('pt-age').value)||55;
+  const tscore=parseFloat(document.getElementById('pt-tscore').value)||-1.5;
+  const site=document.getElementById('pt-site').value;
+  const size=document.getElementById('pt-size').value;
+  // Base porosity from bone density
+  let p=70;
+  if(tscore<=-2.5) p=78;       // osteoporotic — max vascularization
+  else if(tscore<=-1.0) p=73;  // osteopenic
+  else p=65;                   // normal density — prioritize strength
+  // Age adjustment
+  if(age>70) p+=3; else if(age>60) p+=1; else if(age<30) p-=3;
+  // Site adjustment — load-bearing needs lower porosity (stronger)
+  const siteAdj={femur:-4,tibia:-2,spine:-3,cranial:+5,maxilla:+3};
+  p+=(siteAdj[site]||0);
+  // Size adjustment — larger defects need more vascularization
+  if(size==='large') p+=3; else if(size==='small') p-=2;
+  // Clamp
+  p=Math.max(60,Math.min(80,Math.round(p)));
+  const el=document.getElementById('auto-p-result');
+  el.innerHTML=`<span class="auto-badge">Recommended: ${p}%</span>`;
+  return p;
+}
+
+function applyAutoP(){
+  const p=calcAutoP();
+  document.getElementById('porosity-slider').value=p;
+  document.getElementById('porosity-display').textContent=p+'%';
+}
+calcAutoP(); // init on load
 </script>
 </body>
 </html>

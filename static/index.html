@@ -144,6 +144,12 @@
     </div>
     <div id="viability-badge">Generate to check viability</div>
     <div class="divider"></div>
+    <div class="control-group">
+      <label>Cross-section <span id="clip-display">OFF</span></label>
+      <input type="range" id="clip-slider" min="0" max="100" step="1" value="0"
+        oninput="onClipChange(this.value)">
+      <div class="range-labels"><span>Full</span><span>Sliced</span></div>
+    </div>
     <button class="btn btn-secondary" id="dl-btn" onclick="downloadSTL()" disabled>Download STL File</button>
     <details>
       <summary>Literature evidence</summary>
@@ -196,6 +202,11 @@ camera.position.set(25,15,35);
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(viewer.clientWidth,viewer.clientHeight);
+renderer.localClippingEnabled=true;
+
+// Cross-section clipping plane
+const clipPlane=new THREE.Plane(new THREE.Vector3(0,-1,0),0);
+let clipEnabled=false;
 
 scene.add(new THREE.AmbientLight(0xffffff,0.4));
 const kl=new THREE.DirectionalLight(0xffffff,1.4);kl.position.set(30,50,30);scene.add(kl);
@@ -254,9 +265,11 @@ function parseSTL(buffer){
   geom.computeBoundingBox();return geom;
 }
 
-const matSolid=new THREE.MeshPhongMaterial({color:0xc4b4d4,specular:0x444466,shininess:40,side:THREE.DoubleSide});
-const matWire=new THREE.MeshBasicMaterial({color:0x7f77dd,wireframe:true});
-const matTransparent=new THREE.MeshPhongMaterial({color:0x9090dd,transparent:true,opacity:0.25,side:THREE.DoubleSide});
+const matSolid=new THREE.MeshPhongMaterial({color:0xc4b4d4,specular:0x444466,shininess:40,side:THREE.DoubleSide,clippingPlanes:[clipPlane]});
+const matWire=new THREE.MeshBasicMaterial({color:0x7f77dd,wireframe:true,clippingPlanes:[clipPlane]});
+const matTransparent=new THREE.MeshPhongMaterial({color:0x9090dd,transparent:true,opacity:0.25,side:THREE.DoubleSide,clippingPlanes:[clipPlane]});
+// Cross-section inner face material
+const matClipFace=new THREE.MeshPhongMaterial({color:0xdd7777,specular:0x442222,shininess:20,side:THREE.BackSide,clippingPlanes:[clipPlane]});
 let currentMode='solid';
 
 function setViewMode(mode){currentMode=mode;
@@ -331,6 +344,24 @@ function setMetric(id,value,unit,pass){
 function downloadSTL(){if(!currentJobId)return;
   const link=document.createElement('a');link.href='/api/stl/'+currentJobId;
   link.download='bone_scaffold_'+currentJobId+'.stl';link.click();}
+
+// Cross-section control
+function onClipChange(val){
+  const v=parseInt(val);
+  if(v===0){clipEnabled=false;clipPlane.constant=999;
+    document.getElementById('clip-display').textContent='OFF';
+    matSolid.clippingPlanes=[];matWire.clippingPlanes=[];matTransparent.clippingPlanes=[];
+  }else{
+    clipEnabled=true;
+    matSolid.clippingPlanes=[clipPlane];matWire.clippingPlanes=[clipPlane];matTransparent.clippingPlanes=[clipPlane];
+    if(currentMesh){
+      const box=new THREE.Box3().setFromObject(currentMesh);
+      const minY=box.min.y,maxY=box.max.y;
+      clipPlane.constant=maxY-(v/100)*(maxY-minY);
+    }
+    document.getElementById('clip-display').textContent=v+'%';
+  }
+}
 </script>
 </body>
 </html>

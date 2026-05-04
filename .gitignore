@@ -3,6 +3,8 @@ __pycache__/
 *.pth
 *.npy
 *.stl
+data/raw/
+data/processed/
 *.egg-info/
 dist/
 build/

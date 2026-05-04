@@ -68,7 +68,7 @@ def train(
     lr_disc=5e-5,
     beta=0.005,       # KL weight — keep small to preserve structure detail
     lam=0.1,          # adversarial weight — increase if outputs look blurry
-    save_every=25,
+    save_every=10,
 ):
     os.makedirs(checkpoint_dir, exist_ok=True)
 

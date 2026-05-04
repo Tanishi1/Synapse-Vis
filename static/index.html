@@ -217,6 +217,14 @@
         oninput="onClipChange(this.value)">
       <div class="range-labels"><span>Full</span><span>Sliced</span></div>
     </div>
+    <div class="divider"></div>
+    <div class="control-group">
+      <label>Bone Ingrowth <span id="sim-display">Step 0</span></label>
+      <input type="range" id="sim-slider" min="0" max="0" step="1" value="0"
+        oninput="onSimChange(this.value)" disabled>
+      <div class="range-labels"><span>Implant</span><span>Healed</span></div>
+    </div>
+    <button class="btn btn-secondary" id="sim-btn" onclick="runSimulation()" style="margin-bottom:12px" disabled>▶ Run Simulation</button>
     <button class="btn btn-secondary" id="dl-btn" onclick="downloadSTL()" disabled>Download STL File</button>
     <details>
       <summary>Literature evidence</summary>
@@ -401,6 +409,17 @@ async function generate(){
     if(m.biologically_viable){badge.className='viable';badge.textContent='✓ Biologically viable scaffold';}
     else{badge.className='not-viable';badge.textContent='✗ Outside target range — regenerate';}
     loadSTLFromURL(data.stl_url);document.getElementById('dl-btn').disabled=false;
+    
+    // Reset sim
+    document.getElementById('sim-slider').value=0;
+    document.getElementById('sim-slider').disabled=true;
+    document.getElementById('sim-display').textContent='Step 0';
+    const simBtn=document.getElementById('sim-btn');
+    simBtn.disabled=false;
+    simBtn.innerHTML='▶ Run Simulation';
+    simBtn.onclick=runSimulation;
+    clearInterval(simPlaybackInterval);
+    
   }catch(err){console.error(err);
     alert('Generation error: '+err.message+'\n\nMake sure app.py is running on port 5000.');
     document.getElementById('empty-state').style.display='flex';
@@ -520,6 +539,86 @@ function applyAutoP(){
   document.getElementById('porosity-display').textContent=p+'%';
 }
 calcAutoP(); // init on load
+
+// Bone Ingrowth Simulation
+let simSteps=[];
+let simPlaybackInterval=null;
+
+async function runSimulation(){
+  if(!currentJobId)return;
+  const btn=document.getElementById('sim-btn'),loading=document.getElementById('loading'),
+    msg=document.getElementById('loading-msg'),slider=document.getElementById('sim-slider');
+  btn.disabled=true;loading.classList.add('active');
+  msg.textContent='Running morphological diffusion simulation...';
+  try{
+    const res=await fetch('/api/simulate',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({job_id:currentJobId,steps:20})});
+    if(!res.ok) throw new Error('Simulation failed');
+    const data=await res.json();
+    simSteps=data.simulation_steps;
+    
+    // Setup slider
+    slider.disabled=false;
+    slider.max=simSteps.length;
+    slider.value=0;
+    
+    // Playback
+    btn.innerHTML='■ Stop Simulation';
+    btn.onclick=stopSimulation;
+    
+    let step=1;
+    simPlaybackInterval=setInterval(()=>{
+      slider.value=step;
+      onSimChange(step);
+      step++;
+      if(step>simSteps.length) stopSimulation();
+    }, 400);
+    
+  }catch(err){alert('Sim error: '+err.message);btn.disabled=false;btn.innerHTML='▶ Run Simulation';
+  }finally{loading.classList.remove('active');}
+}
+
+function stopSimulation(){
+  clearInterval(simPlaybackInterval);
+  const btn=document.getElementById('sim-btn');
+  btn.innerHTML='▶ Replay Simulation';
+  btn.onclick=()=> { document.getElementById('sim-slider').value=0; runSimulationPlayback(); };
+  btn.disabled=false;
+}
+
+function runSimulationPlayback(){
+  const slider=document.getElementById('sim-slider');
+  const btn=document.getElementById('sim-btn');
+  btn.innerHTML='■ Stop Simulation';
+  btn.onclick=stopSimulation;
+  
+  let step=parseInt(slider.value);
+  if(step>=simSteps.length) step=0;
+  
+  simPlaybackInterval=setInterval(()=>{
+    step++;
+    slider.value=step;
+    onSimChange(step);
+    if(step>=simSteps.length) stopSimulation();
+  }, 400);
+}
+
+function onSimChange(val){
+  const stepIdx=parseInt(val);
+  const display=document.getElementById('sim-display');
+  
+  if(stepIdx===0){
+    display.textContent='Step 0 (0% filled)';
+    // Load original scaffold
+    if(currentJobId) loadSTLFromURL('/api/stl/'+currentJobId);
+    return;
+  }
+  
+  const stepData=simSteps[stepIdx-1];
+  display.textContent=`Step ${stepData.step} (${stepData.bone_fill_pct}% filled)`;
+  loadSTLFromURL(stepData.stl_url);
+}
 </script>
 </body>
 </html>

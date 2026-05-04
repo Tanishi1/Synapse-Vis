@@ -201,6 +201,70 @@ def generate_batch():
 
     return jsonify({"scaffolds": results, "count": len(results)})
 
+@app.route("/api/simulate", methods=["POST"])
+def simulate():
+    """Run bone ingrowth simulation on a specific scaffold."""
+    data = request.get_json(silent=True) or {}
+    job_id = data.get("job_id")
+    steps = int(data.get("steps", 10))
+
+    if not job_id:
+        return jsonify({"error": "Missing job_id"}), 400
+
+    # For hackathon demo: since we don't save the raw voxel grids to disk (only STLs),
+    # we need to re-generate the voxel grid here. In production, we'd load it from a DB.
+    # We use a fixed seed based on job_id so it generates the exact same scaffold.
+    import hashlib
+    seed = int(hashlib.md5(job_id.encode()).hexdigest(), 16) % (2**32)
+    torch.manual_seed(seed)
+
+    # Hack to extract porosity from job_id if it's a fallback
+    porosity_pct = 70
+    if job_id.startswith("fallback_"):
+        porosity_pct = int(job_id.split("_")[1])
+    
+    porosity_frac = porosity_pct / 100.0
+
+    if not model_loaded:
+        return jsonify({"error": "Model required for simulation"}), 503
+
+    try:
+        # Recreate the exact voxel grid
+        voxel = model.generate(porosity_frac, device=device)
+        
+        # Run simulation
+        import model.ingrowth as ingrowth
+        results = ingrowth.simulate_ingrowth(voxel, n_steps=steps)
+        
+        # Save STL for each step showing bone fill
+        step_urls = []
+        for step_data in results:
+            step_num = step_data["step"]
+            sim_job_id = f"{job_id}_sim_{step_num}"
+            stl_path = os.path.join(GENERATED_DIR, f"{sim_job_id}.stl")
+            
+            # Get combined grid (scaffold + new bone)
+            combo_grid = ingrowth.get_ingrowth_at_step(voxel, step_num)
+            
+            # Export to STL (we treat both scaffold=1 and bone=2 as solid for the mesh)
+            # but ideally the viewer would color them differently.
+            # For now, we just export the filled mesh to show pores closing.
+            binary_filled = (combo_grid > 0).astype(np.float32)
+            voxel_to_stl(binary_filled, stl_path)
+            
+            step_data["stl_url"] = f"/api/stl/{sim_job_id}"
+            step_urls.append(step_data)
+            
+        return jsonify({
+            "job_id": job_id,
+            "simulation_steps": step_urls
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Simulation failed: {str(e)}"}), 500
+
 
 if __name__ == "__main__":
     print("Starting Synapse-Vis on http://localhost:5000")

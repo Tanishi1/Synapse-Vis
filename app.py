@@ -162,6 +162,45 @@ def serve_stl(job_id):
 
     return jsonify({"error": "STL not found"}), 404
 
+@app.route("/api/generate_batch", methods=["POST"])
+def generate_batch():
+    """Generate multiple scaffolds for comparison."""
+    data = request.get_json(silent=True) or {}
+    porosity_pct = float(data.get("porosity_pct", 70))
+    porosity_pct = max(55.0, min(85.0, porosity_pct))
+    porosity_frac = porosity_pct / 100.0
+    count = min(int(data.get("count", 5)), 8)  # cap at 8
+
+    results = []
+    for i in range(count):
+        job_id = str(uuid.uuid4())[:8]
+        stl_path = os.path.join(GENERATED_DIR, f"{job_id}.stl")
+
+        if model_loaded:
+            try:
+                voxel = model.generate(porosity_frac, device=device)
+                metrics = compute_scaffold_metrics(voxel)
+                voxel_to_stl(voxel, stl_path)
+            except Exception as e:
+                stl_path, metrics = get_fallback(int(porosity_pct))
+                if stl_path is None:
+                    continue
+                job_id = f"fallback_{int(porosity_pct)}"
+        else:
+            stl_path, metrics = get_fallback(int(porosity_pct))
+            if stl_path is None:
+                continue
+            job_id = f"fallback_{int(porosity_pct)}"
+
+        results.append({
+            "job_id": job_id,
+            "metrics": metrics,
+            "stl_url": f"/api/stl/{job_id}",
+            "index": i + 1,
+        })
+
+    return jsonify({"scaffolds": results, "count": len(results)})
+
 
 if __name__ == "__main__":
     print("Starting Synapse-Vis on http://localhost:5000")

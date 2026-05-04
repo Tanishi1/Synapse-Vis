@@ -88,6 +88,24 @@
     .view-btn:hover { background:var(--bg-input); color:var(--text-1); }
     .view-btn.active { background:var(--accent-dim);
       border-color:rgba(127,119,221,0.5); color:var(--accent); }
+    /* Batch comparison table */
+    #batch-panel { display:none; position:absolute; inset:0; background:rgba(8,8,16,0.92);
+      backdrop-filter:blur(6px); z-index:20; overflow-y:auto; padding:40px; }
+    #batch-panel.active { display:block; }
+    #batch-panel h2 { font-size:16px; margin-bottom:16px; }
+    .batch-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .batch-table th { text-align:left; padding:8px 12px; color:var(--text-2);
+      border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase;
+      letter-spacing:0.07em; }
+    .batch-table td { padding:8px 12px; border-bottom:1px solid var(--border); }
+    .batch-table tr { cursor:pointer; transition:background .15s; }
+    .batch-table tr:hover { background:var(--bg-card); }
+    .batch-table .pass-cell { color:var(--accent-teal); }
+    .batch-table .fail-cell { color:var(--red); }
+    .batch-close { position:absolute; top:20px; right:20px; background:var(--bg-card);
+      border:1px solid var(--border-hi); color:var(--text-2); padding:6px 14px;
+      border-radius:6px; cursor:pointer; font-size:12px; }
+    .batch-close:hover { color:var(--text-1); background:var(--bg-input); }
     #empty-state { position:absolute; inset:0; display:flex; flex-direction:column;
       align-items:center; justify-content:center; gap:12px; color:var(--text-3);
       pointer-events:none; }
@@ -119,6 +137,7 @@
       <div class="range-labels"><span>60% min</span><span>80% max</span></div>
     </div>
     <button class="btn btn-primary" id="gen-btn" onclick="generate()">Generate Scaffold</button>
+    <button class="btn btn-secondary" id="batch-btn" onclick="generateBatch()" style="margin-top:6px">Compare 5 Variants</button>
     <div class="divider"></div>
     <div class="metrics-grid">
       <div class="metric" id="m-porosity">
@@ -190,6 +209,14 @@
       <button class="view-btn active" id="btn-solid" onclick="setViewMode('solid')">Solid</button>
       <button class="view-btn" id="btn-wireframe" onclick="setViewMode('wireframe')">Wireframe</button>
       <button class="view-btn" id="btn-transparent" onclick="setViewMode('transparent')">X-ray</button>
+    </div>
+    <!-- Batch comparison overlay -->
+    <div id="batch-panel">
+      <button class="batch-close" onclick="closeBatch()">✕ Close</button>
+      <h2>Scaffold Comparison — pick the best one</h2>
+      <table class="batch-table"><thead><tr>
+        <th>#</th><th>Porosity</th><th>Pore ∅</th><th>Connectivity</th><th>SA/V</th><th>Viable</th><th></th>
+      </tr></thead><tbody id="batch-body"></tbody></table>
     </div>
   </div>
 </div>
@@ -362,6 +389,57 @@ function onClipChange(val){
     document.getElementById('clip-display').textContent=v+'%';
   }
 }
+
+// Batch generation
+async function generateBatch(){
+  const loading=document.getElementById('loading'),msg=document.getElementById('loading-msg');
+  const porosity=parseInt(document.getElementById('porosity-slider').value);
+  loading.classList.add('active');msg.textContent='Generating 5 scaffold variants...';
+  document.getElementById('batch-btn').disabled=true;
+  try{
+    const res=await fetch('/api/generate_batch',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({porosity_pct:porosity,count:5})});
+    if(!res.ok) throw new Error('Batch generation failed');
+    const data=await res.json();
+    const body=document.getElementById('batch-body');
+    body.innerHTML='';
+    data.scaffolds.forEach((s,i)=>{
+      const m=s.metrics;
+      const viable=m.biologically_viable;
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${i+1}</td>
+        <td>${m.porosity_pct}%</td>
+        <td>${m.mean_pore_diameter_um} μm</td>
+        <td>${m.connectivity_index}</td>
+        <td>${m.sa_to_vol_ratio}</td>
+        <td class="${viable?'pass-cell':'fail-cell'}">${viable?'✓ Yes':'✗ No'}</td>
+        <td><button class="view-btn" style="font-size:11px;padding:4px 10px"
+          onclick="selectBatch('${s.job_id}','${s.stl_url}',${JSON.stringify(m).replace(/"/g,'&quot;')})">View</button></td>`;
+      body.appendChild(tr);
+    });
+    document.getElementById('batch-panel').classList.add('active');
+    document.getElementById('empty-state').style.display='none';
+  }catch(err){alert('Batch error: '+err.message);
+  }finally{loading.classList.remove('active');
+    document.getElementById('batch-btn').disabled=false;}
+}
+
+function selectBatch(jobId,stlUrl,m){
+  currentJobId=jobId;
+  setMetric('m-porosity',m.porosity_pct,'%',m.viable_porosity);
+  setMetric('m-diameter',m.mean_pore_diameter_um,'μm',m.viable_pore_size);
+  setMetric('m-connectivity',m.connectivity_index,'',m.viable_connectivity);
+  setMetric('m-sav',m.sa_to_vol_ratio,'mm⁻¹',m.viable_sav);
+  const badge=document.getElementById('viability-badge');
+  if(m.biologically_viable){badge.className='viable';badge.textContent='✓ Biologically viable scaffold';}
+  else{badge.className='not-viable';badge.textContent='✗ Outside target range — regenerate';}
+  loadSTLFromURL(stlUrl);
+  document.getElementById('dl-btn').disabled=false;
+  closeBatch();
+}
+
+function closeBatch(){document.getElementById('batch-panel').classList.remove('active');}
 </script>
 </body>
 </html>

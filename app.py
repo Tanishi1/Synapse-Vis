@@ -46,7 +46,7 @@ if os.path.exists(CHECKPOINT_PATH):
             model.load_state_dict(state)
         model.eval()
         model_loaded = True
-        print(f"Model loaded from {CHECKPOINT_PATH} on {device}")
+        print(f"✓ Model loaded from {CHECKPOINT_PATH} on {device}")
     except Exception as e:
         print(f"WARNING: Could not load model checkpoint: {e}")
         print("Serving fallback scaffolds only.")
@@ -57,10 +57,7 @@ else:
 
 
 def get_fallback(porosity_pct: int) -> tuple:
-    """
-    Serve a pre-generated scaffold closest to the requested porosity.
-    Used when model isn't loaded or generation fails.
-    """
+    """Serve a pre-generated scaffold closest to the requested porosity."""
     targets = [60, 65, 70, 75, 80]
     closest = min(targets, key=lambda t: abs(t - porosity_pct))
 
@@ -96,7 +93,6 @@ def health():
 @app.route("/api/generate", methods=["POST"])
 def generate():
     data = request.get_json(silent=True) or {}
-    # porosity_pct: 60–80 (percentage, not fraction)
     porosity_pct = float(data.get("porosity_pct", 70))
     porosity_pct = max(55.0, min(85.0, porosity_pct))
     porosity_frac = porosity_pct / 100.0
@@ -106,36 +102,58 @@ def generate():
 
     if model_loaded:
         try:
-            # 1. Generate voxel grid and shape it
+            # ── Use the TRAINED VAE model ──────────────────────────────────
+            # model.generate() samples z ~ N(0,I), conditions on porosity,
+            # decodes to a (64,64,64) binary voxel grid
             voxel = model.generate(porosity_frac, device=device)
             voxel = apply_cylinder_mask(voxel)
 
-            # 2. Compute metrics
+            # Compute biological viability metrics on the voxel grid
             metrics = compute_scaffold_metrics(voxel)
 
-            # 3. Convert to STL
+            # Convert to STL (with pre-smoothing for clean mesh from binary VAE output)
             voxel_to_stl(voxel, stl_path)
 
         except Exception as e:
-            print(f"Generation failed: {e} — serving fallback")
+            print(f"VAE generation failed: {e} — falling back to gyroid, then pre-generated")
+            import traceback; traceback.print_exc()
+
+            # First fallback: gyroid synthetic generator (still better than nothing)
+            try:
+                voxel = generate_bone_sample(target_porosity=porosity_frac)
+                voxel = apply_cylinder_mask(voxel)
+                metrics = compute_scaffold_metrics(voxel)
+                voxel_to_stl(voxel, stl_path)
+                job_id = f"gyroid_{job_id}"
+            except Exception as e2:
+                print(f"Gyroid fallback also failed: {e2}")
+                # Second fallback: pre-generated STL files
+                stl_path, metrics = get_fallback(int(porosity_pct))
+                if stl_path is None:
+                    return jsonify({"error": "All generation methods failed."}), 500
+                job_id = f"fallback_{int(porosity_pct)}"
+    else:
+        # No model loaded — try gyroid first, then pre-generated
+        try:
+            voxel = generate_bone_sample(target_porosity=porosity_frac)
+            voxel = apply_cylinder_mask(voxel)
+            metrics = compute_scaffold_metrics(voxel)
+            voxel_to_stl(voxel, stl_path)
+            job_id = f"gyroid_{job_id}"
+        except Exception:
             stl_path, metrics = get_fallback(int(porosity_pct))
             if stl_path is None:
-                return jsonify({"error": "Generation failed and no fallback available."}), 500
+                return jsonify({
+                    "error": "Model not trained yet. Run: python model/train.py"
+                }), 503
             job_id = f"fallback_{int(porosity_pct)}"
-    else:
-        # No model — serve fallback
-        stl_path, metrics = get_fallback(int(porosity_pct))
-        if stl_path is None:
-            return jsonify({
-                "error": "Model not trained yet. Run: python model/train.py"
-            }), 503
-        job_id = f"fallback_{int(porosity_pct)}"
 
     return jsonify({
         "job_id": job_id,
         "metrics": metrics,
         "stl_url": f"/api/stl/{job_id}",
-        "model_used": "trained_vae_gan" if model_loaded else "fallback",
+        "model_used": "trained_vae" if model_loaded else "gyroid_synthetic",
+        "device": device,
     })
 
 
@@ -147,7 +165,7 @@ def serve_stl(job_id):
         return send_file(
             gen_path,
             mimetype="model/stl",
-            as_attachment=False,           # inline — lets Three.js fetch it
+            as_attachment=False,
             download_name=f"scaffold_{job_id}.stl",
         )
 
@@ -165,6 +183,7 @@ def serve_stl(job_id):
 
     return jsonify({"error": "STL not found"}), 404
 
+
 @app.route("/api/generate_batch", methods=["POST"])
 def generate_batch():
     """Generate multiple scaffolds for comparison."""
@@ -172,25 +191,27 @@ def generate_batch():
     porosity_pct = float(data.get("porosity_pct", 70))
     porosity_pct = max(55.0, min(85.0, porosity_pct))
     porosity_frac = porosity_pct / 100.0
-    count = min(int(data.get("count", 5)), 8)  # cap at 8
+    count = min(int(data.get("count", 5)), 8)
 
     results = []
     for i in range(count):
         job_id = str(uuid.uuid4())[:8]
         stl_path = os.path.join(GENERATED_DIR, f"{job_id}.stl")
 
-        if model_loaded:
-            try:
+        try:
+            if model_loaded:
+                # Each call to model.generate() samples a fresh z from N(0,I)
+                # giving structural variation across the batch at the same porosity
                 voxel = model.generate(porosity_frac, device=device)
-                voxel = apply_cylinder_mask(voxel)
-                metrics = compute_scaffold_metrics(voxel)
-                voxel_to_stl(voxel, stl_path)
-            except Exception as e:
-                stl_path, metrics = get_fallback(int(porosity_pct))
-                if stl_path is None:
-                    continue
-                job_id = f"fallback_{int(porosity_pct)}"
-        else:
+            else:
+                voxel = generate_bone_sample(target_porosity=porosity_frac)
+
+            voxel = apply_cylinder_mask(voxel)
+            metrics = compute_scaffold_metrics(voxel)
+            voxel_to_stl(voxel, stl_path)
+
+        except Exception as e:
+            print(f"Batch item {i} failed: {e}")
             stl_path, metrics = get_fallback(int(porosity_pct))
             if stl_path is None:
                 continue
@@ -203,79 +224,13 @@ def generate_batch():
             "index": i + 1,
         })
 
-    return jsonify({"scaffolds": results, "count": len(results)})
-
-@app.route("/api/simulate", methods=["POST"])
-def simulate():
-    """Run bone ingrowth simulation on a specific scaffold."""
-    data = request.get_json(silent=True) or {}
-    job_id = data.get("job_id")
-    steps = int(data.get("steps", 10))
-
-    if not job_id:
-        return jsonify({"error": "Missing job_id"}), 400
-
-    # For hackathon demo: since we don't save the raw voxel grids to disk (only STLs),
-    # we need to re-generate the voxel grid here. In production, we'd load it from a DB.
-    # We use a fixed seed based on job_id so it generates the exact same scaffold.
-    import hashlib
-    seed = int(hashlib.md5(job_id.encode()).hexdigest(), 16) % (2**32)
-    torch.manual_seed(seed)
-
-    # Hack to extract porosity from job_id if it's a fallback
-    porosity_pct = 70
-    if job_id.startswith("fallback_"):
-        porosity_pct = int(job_id.split("_")[1])
-    
-    porosity_frac = porosity_pct / 100.0
-
-    try:
-        # Recreate the exact voxel grid
-        if model_loaded:
-            voxel = model.generate(porosity_frac, device=device)
-        else:
-            # Fallback for hackathon: if model not loaded, generate synthetic voxel grid
-            # that looks like bone so simulation can still run
-            np.random.seed(seed)
-            voxel = generate_bone_sample(target_porosity=porosity_frac)
-            
-        # Make it a cylinder shape
-        voxel = apply_cylinder_mask(voxel)
-        
-        # Run simulation
-        import model.ingrowth as ingrowth
-        results = ingrowth.simulate_ingrowth(voxel, n_steps=steps)
-        
-        # Save STL for each step showing bone fill
-        step_urls = []
-        for step_data in results:
-            step_num = step_data["step"]
-            sim_job_id = f"{job_id}_sim_{step_num}"
-            stl_path = os.path.join(GENERATED_DIR, f"{sim_job_id}.stl")
-            
-            # Get combined grid (scaffold + new bone)
-            combo_grid = ingrowth.get_ingrowth_at_step(voxel, step_num)
-            
-            # Export to STL (we treat both scaffold=1 and bone=2 as solid for the mesh)
-            # but ideally the viewer would color them differently.
-            # For now, we just export the filled mesh to show pores closing.
-            binary_filled = (combo_grid > 0).astype(np.float32)
-            voxel_to_stl(binary_filled, stl_path)
-            
-            step_data["stl_url"] = f"/api/stl/{sim_job_id}"
-            step_urls.append(step_data)
-            
-        return jsonify({
-            "job_id": job_id,
-            "simulation_steps": step_urls
-        })
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"Simulation failed: {str(e)}"}), 500
+    return jsonify({
+        "scaffolds": results,
+        "count": len(results),
+        "model_used": "trained_vae" if model_loaded else "gyroid_synthetic",
+    })
 
 
 if __name__ == "__main__":
-    print("Starting Synapse-Vis on http://localhost:5000")
+    print(f"Starting Synapse-Vis on http://localhost:5000  [device={device}]")
     app.run(port=5000, debug=False)
